@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -43,7 +43,7 @@ func main() {
 
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(os.Stdout)
-	log.SetLevel(log.InfoLevel)
+	log.SetLevel(log.DebugLevel)
 
 	target, _ := url.Parse(dest)
 	proxy := configureReverseProxy(target)
@@ -61,62 +61,38 @@ func main() {
 }
 
 func configureReverseProxy(target *url.URL) *httputil.ReverseProxy {
-	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	proxy.Director = func(r *http.Request) {
-		r.URL.Scheme = target.Scheme
-		r.URL.Host = target.Host
-		r.Host = target.Host
+	return &httputil.ReverseProxy{
+		Transport: http.DefaultTransport,
+		Director: func(r *http.Request) {
+			r.URL.Scheme = target.Scheme
+			r.URL.Host = target.Host
+			r.Host = target.Host
+		},
+		ModifyResponse: func(r *http.Response) error {
+			return proxyResponseMiddleware(r, target)
+		},
 	}
-
-	proxy.ModifyResponse = func(r *http.Response) error {
-		return proxyResponseMiddleware(r, target)
-	}
-
-	return proxy
 }
+
 func proxyResponseMiddleware(r *http.Response, target *url.URL) error {
-	requestContent := r.Request.Header.Get("Content-Type")
-	responseContent := r.Header.Get("Content-Type")
+	requestLogs, requestBuf, err := readBodyBuffer(r.Request.Body, r.Request.Header.Get("Content-Type"))
+	if err != nil {
+		return err
+	}
+	r.Request.Body = io.NopCloser(bytes.NewBuffer(requestBuf))
 
-	buf, err := io.ReadAll(r.Request.Body)
+	responseLogs, responseBuf, err := readBodyBuffer(r.Body, r.Header.Get("Content-Type"))
 	if err != nil {
-		return fmt.Errorf("error reading request body: %w", err)
+		return err
 	}
-	requestStr, requestJSON, err := readBodyBuffer(buf, requestContent)
-	if err != nil {
-		return fmt.Errorf("error parsing request body: %w", err)
-	}
-
-	buf, err = io.ReadAll(r.Body)
-	if err != nil {
-		return fmt.Errorf("error reading response body: %w", err)
-	}
-	responseStr, responseJSON, err := readBodyBuffer(buf, responseContent)
-	if err != nil {
-		return fmt.Errorf("error parsing response body: %w", err)
-	}
+	r.Body = io.NopCloser(bytes.NewBuffer(responseBuf))
 
 	var logs = ResponseLogs{
 		URL:        target.ResolveReference(r.Request.URL).String(),
 		StatusCode: r.StatusCode,
 		Method:     r.Request.Method,
-		Request: BodyLogs{
-			Body:        requestStr,
-			ContentType: r.Request.Header.Get("Content-Type"),
-		},
-		Response: BodyLogs{
-			Body:        responseStr,
-			ContentType: r.Header.Get("Content-Type"),
-		},
-	}
-
-	if requestJSON != nil {
-		logs.Request.Body = requestJSON
-	}
-
-	if responseJSON != nil {
-		logs.Request.Body = responseJSON
+		Request:    requestLogs,
+		Response:   responseLogs,
 	}
 
 	log.WithFields(log.Fields{
@@ -130,22 +106,29 @@ func proxyResponseMiddleware(r *http.Response, target *url.URL) error {
 	return nil
 }
 
-func readBodyBuffer(buf []byte, contentType string) (string, map[string]interface{}, error) {
-	var bodyStr = ""
-	var requestBody map[string]interface{}
-	var err error
-
-	if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xml") {
-		bodyStr = string(buf)
-		requestBody = nil
-	} else {
-		bodyStr = ""
-		err = json.Unmarshal(buf, &requestBody)
+func readBodyBuffer(r io.ReadCloser, contentType string) (BodyLogs, []byte, error) {
+	bodyLogs := BodyLogs{
+		Body:        nil,
+		ContentType: contentType,
 	}
+
+	buf, err := io.ReadAll(r)
+	if err != nil || len(buf) == 0 {
+		return bodyLogs, buf, err
+	}
+
+	if contentType == "text/html" || contentType == "application/xml" {
+		bodyLogs.Body = string(buf)
+		return bodyLogs, buf, nil
+	}
+
+	var body interface{}
+	err = json.Unmarshal(buf, &body)
 
 	if err != nil {
-		return "", nil, err
+		return bodyLogs, buf, err
 	}
 
-	return bodyStr, requestBody, nil
+	bodyLogs.Body = body
+	return bodyLogs, buf, nil
 }
