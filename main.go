@@ -42,7 +42,7 @@ func main() {
 	}
 
 	proxy.ModifyResponse = func(r *http.Response) error {
-		body, buf, err := readBody(r.Body)
+		body, buf, err := UnmarshallReader(r.Body)
 
 		if err != nil {
 			log.Errorf(err.Error())
@@ -60,7 +60,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body, buf, err := readBody(r.Body)
+		body, buf, err := UnmarshallReader(r.Body)
 
 		if err != nil {
 			log.Errorf(err.Error())
@@ -87,7 +87,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
-func readBody(r io.Reader) (map[string]interface{}, []byte, error) {
+// Reads the provided io.Reader and unmarshals it into a map[string]interface{}.
+// It returns the unmarshalled map, the original request body as a byte slice, and any errors encountered.
+func UnmarshallReader(r io.Reader) (map[string]interface{}, []byte, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {
 		return nil, body, err
