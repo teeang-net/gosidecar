@@ -58,42 +58,46 @@ func configureReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	}
 
 	proxy.ModifyResponse = func(r *http.Response) error {
-		buf, err := io.ReadAll(r.Body)
-		if err != nil {
-			return err
-		}
-
-		var bodyStr = ""
-		var requestBody map[string]interface{}
-
-		r.Body = io.NopCloser(bytes.NewReader(buf))
-
-		// Convert HTML and XML responses to strings
-		contentType := r.Header.Get("Content-Type")
-		if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xml") {
-			bodyStr = string(buf)
-			requestBody = nil
-		} else {
-			bodyStr = ""
-			err = json.Unmarshal(buf, &requestBody)
-		}
-
-		if err != nil {
-			return err
-		}
-
-		log.WithFields(log.Fields{
-			"body":         bodyStr,
-			"Content-Type": contentType,
-			"method":       r.Request.Method,
-			"status":       r.Status,
-			"url":          target.ResolveReference(r.Request.URL).String(),
-		}).Infoln()
-
-		return nil
+		return proxyResponseMiddleware(r, target)
 	}
 
 	return proxy
+}
+
+func proxyResponseMiddleware(r *http.Response, target *url.URL) error {
+	buf, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+
+	var bodyStr = ""
+	var requestBody map[string]interface{}
+
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+
+	// Convert HTML and XML responses to strings
+	contentType := r.Header.Get("Content-Type")
+	if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xml") {
+		bodyStr = string(buf)
+		requestBody = nil
+	} else {
+		bodyStr = ""
+		err = json.Unmarshal(buf, &requestBody)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{
+		"body":         bodyStr,
+		"Content-Type": contentType,
+		"method":       r.Request.Method,
+		"status":       r.Status,
+		"url":          target.ResolveReference(r.Request.URL).String(),
+	}).Infoln()
+
+	return nil
 }
 
 // Reads the provided io.Reader and unmarshals it into a map[string]interface{}.
