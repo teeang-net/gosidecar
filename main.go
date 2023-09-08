@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -36,7 +37,7 @@ func main() {
 	proxy := configureReverseProxy(target)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRequest(w, r, target, proxy)
+		proxy.ServeHTTP(w, r)
 	})
 
 	log.WithFields(log.Fields{
@@ -45,26 +46,6 @@ func main() {
 	}).Info("Starting server")
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
-}
-
-func handleRequest(w http.ResponseWriter, r *http.Request, target *url.URL, proxy *httputil.ReverseProxy) {
-	body, buf, err := UnmarshallReader(r.Body)
-
-	if err != nil {
-		log.Errorf(err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	r.Body = io.NopCloser(bytes.NewReader(buf))
-
-	log.WithFields(log.Fields{
-		"body":   body,
-		"method": r.Method,
-		"url":    target.ResolveReference(r.URL).String(),
-	}).Infoln()
-
-	proxy.ServeHTTP(w, r)
 }
 
 func configureReverseProxy(target *url.URL) *httputil.ReverseProxy {
@@ -77,18 +58,36 @@ func configureReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	}
 
 	proxy.ModifyResponse = func(r *http.Response) error {
-		body, buf, err := UnmarshallReader(r.Body)
-
+		buf, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Errorf(err.Error())
 			return err
 		}
 
+		var bodyStr = ""
+		var requestBody map[string]interface{}
+
 		r.Body = io.NopCloser(bytes.NewReader(buf))
 
+		// Convert HTML and XML responses to strings
+		contentType := r.Header.Get("Content-Type")
+		if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xml") {
+			bodyStr = string(buf)
+			requestBody = nil
+		} else {
+			bodyStr = ""
+			err = json.Unmarshal(buf, &requestBody)
+		}
+
+		if err != nil {
+			return err
+		}
+
 		log.WithFields(log.Fields{
-			"body":   body,
-			"status": r.Status,
+			"body":         bodyStr,
+			"Content-Type": contentType,
+			"method":       r.Request.Method,
+			"status":       r.Status,
+			"url":          target.ResolveReference(r.Request.URL).String(),
 		}).Infoln()
 
 		return nil
