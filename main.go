@@ -42,6 +42,23 @@ func main() {
 		r.Host = target.Host
 	}
 
+	proxy.ModifyResponse = func(r *http.Response) error {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Errorf("Error reading response body: %v", err)
+			return err
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		log.WithFields(log.Fields{
+			"body":   string(body),
+			"status": r.Status,
+		}).Infoln()
+
+		return nil
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
