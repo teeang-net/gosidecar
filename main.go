@@ -33,6 +33,41 @@ func main() {
 	log.SetLevel(log.InfoLevel)
 
 	target, _ := url.Parse(dest)
+	proxy := configureReverseProxy(target)
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		handleRequest(w, r, target, proxy)
+	})
+
+	log.WithFields(log.Fields{
+		"port": port,
+		"dest": dest,
+	}).Info("Starting server")
+
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+func handleRequest(w http.ResponseWriter, r *http.Request, target *url.URL, proxy *httputil.ReverseProxy) {
+	body, buf, err := UnmarshallReader(r.Body)
+
+	if err != nil {
+		log.Errorf(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+
+	log.WithFields(log.Fields{
+		"body":   body,
+		"method": r.Method,
+		"url":    target.ResolveReference(r.URL).String(),
+	}).Infoln()
+
+	proxy.ServeHTTP(w, r)
+}
+
+func configureReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	proxy.Director = func(r *http.Request) {
@@ -59,32 +94,7 @@ func main() {
 		return nil
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body, buf, err := UnmarshallReader(r.Body)
-
-		if err != nil {
-			log.Errorf(err.Error())
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		r.Body = io.NopCloser(bytes.NewReader(buf))
-
-		log.WithFields(log.Fields{
-			"body":   body,
-			"method": r.Method,
-			"url":    target.ResolveReference(r.URL).String(),
-		}).Infoln()
-
-		proxy.ServeHTTP(w, r)
-	})
-
-	log.WithFields(log.Fields{
-		"port": port,
-		"dest": dest,
-	}).Info("Starting server")
-
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+	return proxy
 }
 
 // Reads the provided io.Reader and unmarshals it into a map[string]interface{}.
