@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -12,8 +13,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
-
-type RequestBody struct{}
 
 func main() {
 	var (
@@ -43,16 +42,17 @@ func main() {
 	}
 
 	proxy.ModifyResponse = func(r *http.Response) error {
-		body, err := io.ReadAll(r.Body)
+		body, buf, err := readBody(r.Body)
+
 		if err != nil {
-			log.Errorf("Error reading response body: %v", err)
+			log.Errorf(err.Error())
 			return err
 		}
 
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.Body = io.NopCloser(bytes.NewReader(buf))
 
 		log.WithFields(log.Fields{
-			"body":   string(body),
+			"body":   body,
 			"status": r.Status,
 		}).Infoln()
 
@@ -60,17 +60,18 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, buf, err := readBody(r.Body)
+
 		if err != nil {
-			log.Errorf("Error reading request body: %v", err)
-			http.Error(w, "Error reading request body", http.StatusInternalServerError)
+			log.Errorf(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.Body = io.NopCloser(bytes.NewReader(buf))
 
 		log.WithFields(log.Fields{
-			"body":   string(body),
+			"body":   body,
 			"method": r.Method,
 			"url":    target.ResolveReference(r.URL).String(),
 		}).Infoln()
@@ -84,4 +85,20 @@ func main() {
 	}).Info("Starting server")
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+func readBody(r io.Reader) (map[string]interface{}, []byte, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, body, err
+	}
+
+	var requestBody map[string]interface{}
+	err = json.Unmarshal(body, &requestBody)
+
+	if err != nil {
+		return nil, body, err
+	}
+
+	return requestBody, body, nil
 }
