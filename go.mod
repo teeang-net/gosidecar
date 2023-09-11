@@ -1,4 +1,4 @@
-module github.com/davidtaing/webhookreplay
+module github.com/davidtaing/gosidecar
 
 go 1.21.0
 
