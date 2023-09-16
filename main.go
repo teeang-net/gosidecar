@@ -1,9 +1,11 @@
+/*
+Copyright © 2023 NAME HERE <EMAIL ADDRESS>
+
+*/
 package main
 
-import (
-	"fmt"
-)
+import "github.com/davidtaing/gosidecar/cmd"
 
 func main() {
-	fmt.Println("Starting over again. Hello World")
+	cmd.Execute()
 }
