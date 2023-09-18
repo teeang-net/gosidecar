@@ -47,11 +47,11 @@ func main() {
 	}
 
 	http.HandleFunc("/unlimited", unlimitedHandler)
-	http.Handle("/limited", fixedWindow(http.HandlerFunc(limitedHandler)))
+	http.Handle("/limited", tokenBucket(http.HandlerFunc(limitedHandler)))
 	logger.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func fixedWindow(next http.Handler) http.Handler {
+func tokenBucket(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		remoteAddr := r.RemoteAddr
 		ip := strings.Split(remoteAddr, ":")[0]
