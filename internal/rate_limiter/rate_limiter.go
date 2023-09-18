@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -59,8 +58,7 @@ func fixedWindow(next http.Handler) http.Handler {
 		bucket, ok := rateLimitMap[ip]
 
 		if !ok {
-			fmt.Println(ip)
-			fmt.Printf("Bucket Initialized for %s\n", ip)
+			log.Info("Bucket Initialized for IP: ", ip)
 			b := initialBucket
 			rateLimitMap[ip] = &b
 			bucket = &b
