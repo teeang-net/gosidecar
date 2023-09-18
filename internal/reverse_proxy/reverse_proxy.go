@@ -2,10 +2,11 @@ package reverse_proxy
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func Start(targetURL string, port uint32) {
@@ -18,9 +19,13 @@ func Start(targetURL string, port uint32) {
 
 	rp := httputil.NewSingleHostReverseProxy(target)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		rp.ServeHTTP(w, r)
-	})
+	http.HandleFunc("/", handleRequest(rp))
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+func handleRequest(rp *httputil.ReverseProxy) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rp.ServeHTTP(w, r)
+	}
 }
