@@ -3,26 +3,35 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
-var bucket = 10
-var refill = 1
+const initialBucket uint = uint(10)
+
+var refill uint = 1
 var refillRate time.Duration = 1
+var rateLimitMap = make(map[string]*Bucket)
+
+type Bucket = uint
 
 func main() {
 	ticker := time.NewTicker(refillRate * time.Second)
 
 	go func() {
 		for range ticker.C {
-			if bucket < 10 {
-				fmt.Println("New token")
-				bucket++
+			for k, p := range rateLimitMap {
+				if *p < uint(10) {
+					*p++
+					log.WithFields(log.Fields{
+						"key":    k,
+						"bucket": *p,
+						"refill": refill,
+					}).Info("New Token Added")
+				}
 			}
-
-			fmt.Printf("Bucket: %d, Refresh: %d\n", bucket, refill)
 		}
 	}()
 
@@ -41,15 +50,34 @@ func main() {
 
 func fixedWindow(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if bucket <= 0 {
+		k := "hello"
+		bucket, ok := rateLimitMap[k]
+
+		if !ok {
+			fmt.Println(k)
+			fmt.Printf("Bucket Initialized for %s\n", k)
+			b := initialBucket
+			rateLimitMap[k] = &b
+			bucket = &b
+		}
+
+		if *bucket <= uint(0) {
+			log.WithFields(log.Fields{
+				"key":    k,
+				"bucket": *bucket,
+			}).Warn("Rate limit exceeded")
+
 			w.WriteHeader(http.StatusTooManyRequests)
 			io.WriteString(w, http.StatusText(http.StatusTooManyRequests))
 			return
 		}
 
-		fmt.Printf("Bucket: %d, Refresh: %d\n", bucket, refill)
-		bucket--
+		log.WithFields(log.Fields{
+			"key":    k,
+			"bucket": *bucket,
+		}).Info("Request processed")
+
+		*bucket--
 		next.ServeHTTP(w, r)
-		log.Println("Request processed")
 	})
 }
