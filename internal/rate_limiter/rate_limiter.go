@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -14,10 +15,13 @@ const initialBucket uint = uint(10)
 var refill uint = 1
 var refillRate time.Duration = 1
 var rateLimitMap = make(map[string]*Bucket)
+var logger = log.New()
 
 type Bucket = uint
 
 func main() {
+	// logger.SetFormatter(&log.JSONFormatter{})
+
 	ticker := time.NewTicker(refillRate * time.Second)
 
 	go func() {
@@ -25,7 +29,7 @@ func main() {
 			for k, p := range rateLimitMap {
 				if *p < uint(10) {
 					*p++
-					log.WithFields(log.Fields{
+					logger.WithFields(log.Fields{
 						"key":    k,
 						"bucket": *p,
 						"refill": refill,
@@ -45,25 +49,26 @@ func main() {
 
 	http.HandleFunc("/unlimited", unlimitedHandler)
 	http.Handle("/limited", fixedWindow(http.HandlerFunc(limitedHandler)))
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	logger.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func fixedWindow(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		k := "hello"
-		bucket, ok := rateLimitMap[k]
+		remoteAddr := r.RemoteAddr
+		ip := strings.Split(remoteAddr, ":")[0]
+		bucket, ok := rateLimitMap[ip]
 
 		if !ok {
-			fmt.Println(k)
-			fmt.Printf("Bucket Initialized for %s\n", k)
+			fmt.Println(ip)
+			fmt.Printf("Bucket Initialized for %s\n", ip)
 			b := initialBucket
-			rateLimitMap[k] = &b
+			rateLimitMap[ip] = &b
 			bucket = &b
 		}
 
 		if *bucket <= uint(0) {
-			log.WithFields(log.Fields{
-				"key":    k,
+			logger.WithFields(log.Fields{
+				"ip":     ip,
 				"bucket": *bucket,
 			}).Warn("Rate limit exceeded")
 
@@ -72,8 +77,8 @@ func fixedWindow(next http.Handler) http.Handler {
 			return
 		}
 
-		log.WithFields(log.Fields{
-			"key":    k,
+		logger.WithFields(log.Fields{
+			"ip":     ip,
 			"bucket": *bucket,
 		}).Info("Request processed")
 
